@@ -42,7 +42,6 @@
             var container = $(this),
                 resourceURL = (url && (!url.indexOf('http://') || !url.indexOf('https://'))) ? url : container.attr("href"),
                 provider;
-
             if (embedAction) {
                 settings.onEmbed = embedAction;
             }
@@ -177,6 +176,21 @@
         return url;
     }
 
+    /** A thin wrapper on window.location.protocol for protocol agnostic urls 
+     * Without it, using such URLs (ex:  //youtube.com/whatever) will not work 
+     * if the script is served from a file (such as example/test.html)
+     * @return http: or https: depending on the current url, and
+     *         http: if the current protocol is file:
+     */
+    function getDefaultProtocol() {
+        if(window.location.protocol === 'file:') {
+            return 'http:';
+        }
+        else {
+            return window.location.protocol;
+        }
+    }
+
     function success(oembedData, externalUrl, container) {
         $('#jqoembeddata').data(externalUrl, oembedData.code);
         settings.beforeEmbed.call(container, oembedData);
@@ -197,7 +211,7 @@
             if (from == 'html')
                 query += " and compat='html5'";
             var ajaxopts = $.extend({
-                url: "//query.yahooapis.com/v1/public/yql",
+                url: getDefaultProtocol() + "//query.yahooapis.com/v1/public/yql",
                 dataType: 'jsonp',
                 data: {
                     q: query,
@@ -448,6 +462,7 @@
 
                 if (url.match(regExp) !== null)
                     return $.fn.oembed.providers[i];
+
             }
         }
         return null;
@@ -544,7 +559,7 @@
     $.fn.oembed.providers = [
 
         //Video
-        new $.fn.oembed.OEmbedProvider("youtube", "video", ["youtube\\.com/watch.+v=[\\w-]+&?", "youtu\\.be/[\\w-]+", "youtube.com/embed"], '//www.youtube.com/embed/$1?wmode=transparent', {
+        new $.fn.oembed.OEmbedProvider("youtube", "video", ["youtube\\.com/watch.+v=[\\w-]+&?", "youtu\\.be/[\\w-]+", "youtube.com/embed"], getDefaultProtocol() + '//www.youtube.com/embed/$1?wmode=transparent', {
             templateRegex: /.*(?:v\=|be\/|embed\/)([\w\-]+)&?.*/, embedtag: {tag: 'iframe', width: '425', height: '349'}
         }),
 
@@ -591,7 +606,7 @@
         new $.fn.oembed.OEmbedProvider("sapo", "video", ["videos\\.sapo\\.pt/.*"], "http://videos.sapo.pt/oembed", {useYQL: 'json'}),
         new $.fn.oembed.OEmbedProvider("vodpod", "video", ["vodpod.com/watch/.*"], "http://vodpod.com/oembed.js", {useYQL: 'json'}),
         new $.fn.oembed.OEmbedProvider("vimeo", "video", ["www\.vimeo\.com\/groups\/.*\/videos\/.*", "www\.vimeo\.com\/.*", "vimeo\.com\/groups\/.*\/videos\/.*", "vimeo\.com\/.*"], "//vimeo.com/api/oembed.json"),
-        new $.fn.oembed.OEmbedProvider("dailymotion", "video", ["dailymotion\\.com/.+"], '//www.dailymotion.com/services/oembed'),
+        new $.fn.oembed.OEmbedProvider("dailymotion", "video", ["dailymotion\\.com/.+"], getDefaultProtocol() + '//www.dailymotion.com/services/oembed'),
         new $.fn.oembed.OEmbedProvider("5min", "video", ["www\\.5min\\.com/.+"], 'http://api.5min.com/oembed.xml', {useYQL: 'xml'}),
         new $.fn.oembed.OEmbedProvider("National Film Board of Canada", "video", ["nfb\\.ca/film/.+"], 'http://www.nfb.ca/remote/services/oembed/', {useYQL: 'json'}),
         new $.fn.oembed.OEmbedProvider("qik", "video", ["qik\\.com/\\w+"], 'http://qik.com/api/oembed.json', {useYQL: 'json'}),
