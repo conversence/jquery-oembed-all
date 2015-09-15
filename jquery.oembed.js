@@ -42,6 +42,9 @@
             var container = $(this),
                 resourceURL = (url && (!url.indexOf('http://') || !url.indexOf('https://'))) ? url : container.attr("href"),
                 provider;
+            if(settings.debug) {
+                console.log("Trying to embeed ", resourceURL, "for", this);
+            }
             if (embedAction) {
                 settings.onEmbed = embedAction;
             }
@@ -124,13 +127,32 @@
         includeHandle: true,
         embedMethod: 'auto',
         // "auto", "append", "fill"
+        /** Called when no provided matched the final URL */
         onProviderNotFound: function () {
+            if(settings.debug) {
+                console.log("default onProviderNotFound called with", arguments);
+            }
         },
         beforeEmbed: function () {
+            if(settings.debug) {
+                console.log("default beforeEmbed called with", arguments);
+            }
         },
         afterEmbed: function () {
+            if(settings.debug) {
+                console.log("default afterEmbed called with", arguments);
+            }
         },
+        /** If defined, will be called instead of oembed default embeed function */
         onEmbed: false,
+        /** Called if embeeding wasn't possible, for any reason
+         * Not the same as onError, which is called on any error, even 
+         * recoverable ones */
+        onEmbedFailed: function () {
+            if(settings.debug) {
+                console.log("default onEmbedFailed called with", arguments);
+            }
+        },
         onError: function (a, b, c, d) {
             console.log('err:', a, b, c, d)
         },
@@ -200,6 +222,9 @@
 
     function embedCode(container, externalUrl, embedProvider) {
         if ($('#jqoembeddata').data(externalUrl) != undefined && embedProvider.embedtag.tag != 'iframe') {
+            if(settings.debug) {
+                console.log("embedCode() embeding with iframe for provider ", embedProvider);
+            }
             var oembedData = {code: $('#jqoembeddata').data(externalUrl)};
             success(oembedData, externalUrl, container);
         } else if (embedProvider.yql) {
@@ -208,6 +233,9 @@
             var query = 'SELECT * FROM ' + from
                 + ' WHERE url="' + (url) + '"'
                 + " and " + (/html/.test(from) ? 'xpath' : 'itemPath') + "='" + (embedProvider.yql.xpath || '/') + "'";
+            if(settings.debug) {
+                console.log("embedCode() embeding with yql for provider ", embedProvider);
+            }
             if (from == 'html')
                 query += " and compat='html5'";
             var ajaxopts = $.extend({
@@ -258,16 +286,28 @@
                     } else {
                         result = embedProvider.yql.datareturn ? embedProvider.yql.datareturn(data.query.results) : data.query.results.result;
                     }
-                    if (result === false)return;
+                    if (result === false) {
+                        var textStatus = "YQL returned no results";
+                        console.log(settings);
+                        settings.onEmbedFailed.call(container, externalUrl, embedProvider, textStatus);
+                        settings.onError.call(container, externalUrl, embedProvider, textStatus);
+                        return;
+                    }
                     var oembedData = $.extend({}, result);
                     oembedData.code = result;
                     success(oembedData, externalUrl, container);
                 },
-                error: settings.onError.call(container, externalUrl, embedProvider)
+                error: function(jqXHR, textStatus, errorThrown) {
+                    settings.onEmbedFailed.call(container, externalUrl, embedProvider, textStatus);
+                    settings.onError.call(container, externalUrl, embedProvider, textStatus);
+                }
             }, settings.ajaxOptions || {});
             $.ajax(ajaxopts);
         } else if (embedProvider.templateRegex) {
             if (embedProvider.embedtag.tag !== '') {
+                if(settings.debug) {
+                    console.log("embedCode() embeding with templateRegex and tag ", embedProvider.embedtag.tag, " for provider ", embedProvider);
+                }
                 var flashvars = embedProvider.embedtag.flashvars || '';
                 var tag = embedProvider.embedtag.tag || 'embed';
                 var width = embedProvider.embedtag.width || 'auto';
@@ -302,6 +342,9 @@
 
                 success({code: code}, externalUrl, container);
             } else if (embedProvider.apiendpoint) {
+                if(settings.debug) {
+                    console.log("embedCode() embeding with templateRegex and apiendpoint for provider ", embedProvider);
+                }
                 //Add APIkey if true
                 if (embedProvider.apikey)
                     embedProvider.apiendpoint = embedProvider.apiendpoint.replace('_APIKEY_', settings.apikeys[embedProvider.name]);
@@ -314,14 +357,23 @@
                         oembedData.code = embedProvider.templateData(data);
                         success(oembedData, externalUrl, container);
                     },
-                    error: settings.onError.call(container, externalUrl, embedProvider)
+                    error: function(jqXHR) {
+                        var errorText = "Request to api endpoint " + jqXHR.url;
+                        settings.onError.call(container, externalUrl, embedProvider, errorText);
+                        settings.onEmbedFailed.call(container, externalUrl, embedProvider, errorText);
+                    }
                 }, settings.ajaxOptions || {});
                 $.ajax(ajaxopts);
             } else {
+                if(settings.debug) {
+                    console.log("embedCode() embeding with templateRegex only for provider ", embedProvider);
+                }
                 success({code: externalUrl.replace(embedProvider.templateRegex, embedProvider.template)}, externalUrl, container);
             }
         } else {
-
+            if(settings.debug) {
+                console.log("embedCode() embeding with fallback for provider ", embedProvider);
+            }
             var requestUrl = getRequestUrl(embedProvider, externalUrl);
             ajaxopts = $.extend({
                 url: requestUrl,
@@ -460,10 +512,17 @@
             for (var j = 0, l = $.fn.oembed.providers[i].urlschemes.length; j < l; j++) {
                 var regExp = new RegExp($.fn.oembed.providers[i].urlschemes[j], "i");
 
-                if (url.match(regExp) !== null)
+                if (url.match(regExp) !== null) {
+                    if(settings.debug) {
+                        console.log("getOEmbedProvider for ", url, " returning ", $.fn.oembed.providers[i]);
+                    }
                     return $.fn.oembed.providers[i];
+                }
 
             }
+        }
+        if(settings.debug) {
+            console.log("getOEmbedProvider for ", url, " didn't find any providers, returning null");
         }
         return null;
     };
