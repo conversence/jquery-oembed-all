@@ -40,8 +40,7 @@
 
         return this.each(function () {
             var container = $(this),
-                resourceURL = (url && (!url.indexOf('http://') || !url.indexOf('https://'))) ? url : container.attr("href"),
-                provider;
+                resourceURL = (url && (!url.indexOf('http://') || !url.indexOf('https://'))) ? url : container.attr("href");
             if(settings.debug) {
                 console.log("Trying to embeed ", resourceURL, "for", this);
             }
@@ -54,6 +53,38 @@
                 };
             }
 
+            function findAndProcessOEmbedProviders(resourceURL, providers){
+                var provider = null;
+                if(providers === undefined) {
+                    providers = $.fn.oembed.getOEmbedProviders(resourceURL);
+                    if(providers.length === 0) {
+                        settings.onProviderNotFound.call(container, resourceURL);
+                        return;
+                    }
+                }
+                provider = providers.shift();
+
+                //remove fallbacks
+                if (provider && !!settings.fallback === false) {
+                    provider = provider.name.toLowerCase() === 'opengraph' ? undefined : provider;
+                    provider = provider.name.toLowerCase() === 'mimeembeed' ? undefined : provider;
+                }
+                if (provider !== undefined) {
+                    provider.params = getNormalizedParams(settings[provider.name]) || {};
+                    provider.maxWidth = settings.maxWidth;
+                    provider.maxHeight = settings.maxHeight;
+
+                    embedCode(container, resourceURL, provider, function() {
+                        findAndProcessOEmbedProviders(resourceURL, providers);
+                    });
+                }
+                else if (providers.length === 0) {
+                    settings.onEmbedFailed.call(container, resourceURL, undefined, "No more providers to try");
+                }
+                else {
+                    findAndProcessOEmbedProviders(resourceURL, providers);
+                }
+            }
             if (resourceURL !== null && resourceURL !== undefined) {
                 //Check if shorten URL
                 for (var j = 0, l = shortURLList.length; j < l; j++) {
@@ -72,24 +103,11 @@
                             success: function (data) {
                                 //this = $.fn.oembed;
                                 resourceURL = data['long-url'];
-                                provider = $.fn.oembed.getOEmbedProvider(data['long-url']);
-
-                                //remove fallback
-                                if (!!settings.fallback === false) {
-                                    provider = provider.name.toLowerCase() === 'opengraph' ? null : provider;
-                                }
-
-                                if (provider !== null) {
-                                    provider.params = getNormalizedParams(settings[provider.name]) || {};
-                                    provider.maxWidth = settings.maxWidth;
-                                    provider.maxHeight = settings.maxHeight;
-                                    embedCode(container, resourceURL, provider);
-                                } else {
-                                    settings.onProviderNotFound.call(container, resourceURL);
-                                }
+                                findAndProcessOEmbedProviders(resourceURL);
                             },
                             error: function () {
-                                settings.onError.call(container, resourceURL)
+                                settings.onError.call(container, resourceURL, undefined, "Unable to expand url");
+                                settings.onEmbedFailed.call(container, externalUrl, undefined, "Unable to expand url");
                             }
                         }, settings.longUrlAjaxOptions || settings.ajaxOptions || {});
 
@@ -98,20 +116,7 @@
                         return container;
                     }
                 }
-                provider = $.fn.oembed.getOEmbedProvider(resourceURL);
-
-                //remove fallback
-                if (!!settings.fallback === false) {
-                    provider = provider.name.toLowerCase() === 'opengraph' ? null : provider;
-                }
-                if (provider !== null) {
-                    provider.params = getNormalizedParams(settings[provider.name]) || {};
-                    provider.maxWidth = settings.maxWidth;
-                    provider.maxHeight = settings.maxHeight;
-                    embedCode(container, resourceURL, provider);
-                } else {
-                    settings.onProviderNotFound.call(container, resourceURL);
-                }
+                findAndProcessOEmbedProviders(resourceURL);
             }
             return container;
         });
@@ -127,8 +132,9 @@
         includeHandle: true,
         embedMethod: 'auto',
         // "auto", "append", "fill"
-        /** Called when no provided matched the final URL */
-        onProviderNotFound: function () {
+        /** Called when no provider matched the final URL.
+         * Only relevent if settings.fallback === false */
+        onProviderNotFound: function (container, resourceURL) {
             if(settings.debug) {
                 console.log("default onProviderNotFound called with", arguments);
             }
@@ -154,7 +160,7 @@
             }
         },
         onError: function (a, b, c, d) {
-            console.log('err:', a, b, c, d)
+            console.log('err:', a, b, c, d);
         },
         ajaxOptions: {},
         longUrlAjaxOptions: {}
@@ -167,7 +173,7 @@
     }
 
     function getRequestUrl(provider, externalUrl) {
-        var url = provider.apiendpoint,
+        var url = provider.apiendpoint || externalUrl,
             qs = "",
             i;
         url += (url.indexOf("?") <= 0) ? "?" : "&";
@@ -220,7 +226,7 @@
         settings.afterEmbed.call(container, oembedData);
     }
 
-    function embedCode(container, externalUrl, embedProvider) {
+    function embedCode(container, externalUrl, embedProvider, errorCb) {
         if ($('#jqoembeddata').data(externalUrl) != undefined && embedProvider.embedtag.tag != 'iframe') {
             if(settings.debug) {
                 console.log("embedCode() embeding with iframe for provider ", embedProvider);
@@ -288,9 +294,8 @@
                     }
                     if (result === false) {
                         var textStatus = "YQL returned no results";
-                        console.log(settings);
-                        settings.onEmbedFailed.call(container, externalUrl, embedProvider, textStatus);
                         settings.onError.call(container, externalUrl, embedProvider, textStatus);
+                        errorCb.call(container, externalUrl, embedProvider, textStatus);
                         return;
                     }
                     var oembedData = $.extend({}, result);
@@ -298,8 +303,8 @@
                     success(oembedData, externalUrl, container);
                 },
                 error: function(jqXHR, textStatus, errorThrown) {
-                    settings.onEmbedFailed.call(container, externalUrl, embedProvider, textStatus);
                     settings.onError.call(container, externalUrl, embedProvider, textStatus);
+                    errorCb.call(container, externalUrl, embedProvider, textStatus);
                 }
             }, settings.ajaxOptions || {});
             $.ajax(ajaxopts);
@@ -357,10 +362,10 @@
                         oembedData.code = embedProvider.templateData(data);
                         success(oembedData, externalUrl, container);
                     },
-                    error: function(jqXHR) {
-                        var errorText = "Request to api endpoint " + jqXHR.url;
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        var errorText = "Request to api endpoint " + jqXHR.url + " failed with " + textStatus;
                         settings.onError.call(container, externalUrl, embedProvider, errorText);
-                        settings.onEmbedFailed.call(container, externalUrl, embedProvider, errorText);
+                        errorCb.call(container, externalUrl, embedProvider, errorText);
                     }
                 }, settings.ajaxOptions || {});
                 $.ajax(ajaxopts);
@@ -370,9 +375,49 @@
                 }
                 success({code: externalUrl.replace(embedProvider.templateRegex, embedProvider.template)}, externalUrl, container);
             }
-        } else {
+        } else if(embedProvider.type === 'mime') {
             if(settings.debug) {
-                console.log("embedCode() embeding with fallback for provider ", embedProvider);
+                console.log("embedCode() embeding based on mimetype for ", embedProvider);
+            }
+            var requestUrl = getRequestUrl(embedProvider, externalUrl);
+            ajaxopts = $.extend({
+                url: requestUrl,
+                type: 'HEAD',
+                success: function (data, textStatus, jqXHR) {
+                    var mimeType = jqXHR.getResponseHeader('content-type'),
+                        type,
+                        subtype,
+                        typeFragments = mimeType.split("/"),
+                        oembedData = {url: requestUrl};
+                    if(typeFragments) {
+                        type = typeFragments[0];
+                        subtype = typeFragments[0];
+                    }
+                    switch (type) {
+                        case "image":
+                            oembedData.type = 'photo';
+                            console.log(oembedData);
+                            oembedData.code = $.fn.oembed.getPhotoCode(externalUrl, oembedData);
+                            break;
+                        default:
+                            var errorText = "Unsuppported Mime type " + type;
+                            settings.onError.call(container, externalUrl, embedProvider, errorText);
+                            errorCb.call(container, externalUrl, embedProvider, errorText);
+                            return;
+                            break;
+                    }
+                    success(oembedData, externalUrl, container);
+                },
+                error: function (jqXHR, textStatus, errorThrown) {
+                    settings.onError.call(container, externalUrl, embedProvider, textStatus);
+                    errorCb.call(container, externalUrl, embedProvider, textStatus);
+                }
+            }, settings.ajaxOptions || {});
+            $.ajax(ajaxopts);
+        }
+        else {
+            if(settings.debug) {
+                console.log("embedCode() embeding for pure oembed api endpoint for ", embedProvider);
             }
             var requestUrl = getRequestUrl(embedProvider, externalUrl);
             ajaxopts = $.extend({
@@ -395,7 +440,10 @@
                     }
                     success(oembedData, externalUrl, container);
                 },
-                error: settings.onError.call(container, externalUrl, embedProvider)
+                error: function (jqXHR, textStatus, errorThrown) {
+                    settings.onError.call(container, externalUrl, embedProvider, textStatus);
+                    errorCb.call(container, externalUrl, embedProvider, textStatus);
+                }
             }, settings.ajaxOptions || {});
             $.ajax(ajaxopts);
         }
@@ -507,24 +555,21 @@
         return code;
     };
 
-    $.fn.oembed.getOEmbedProvider = function (url) {
+    $.fn.oembed.getOEmbedProviders = function (url) {
+	var applicableProviders = [];
         for (var i = 0; i < $.fn.oembed.providers.length; i++) {
             for (var j = 0, l = $.fn.oembed.providers[i].urlschemes.length; j < l; j++) {
                 var regExp = new RegExp($.fn.oembed.providers[i].urlschemes[j], "i");
-
                 if (url.match(regExp) !== null) {
-                    if(settings.debug) {
-                        console.log("getOEmbedProvider for ", url, " returning ", $.fn.oembed.providers[i]);
-                    }
-                    return $.fn.oembed.providers[i];
+                    applicableProviders.push($.fn.oembed.providers[i]);
                 }
 
             }
         }
         if(settings.debug) {
-            console.log("getOEmbedProvider for ", url, " didn't find any providers, returning null");
+            console.log("getOEmbedProvider for ", url, " returning: ", applicableProviders.length, applicableProviders);
         }
-        return null;
+        return applicableProviders;
     };
 
     // Constructor Function for OEmbedProvider Class.
@@ -1069,8 +1114,9 @@
                     }
                 }
             }
-        )
+        ),
 
+        new $.fn.oembed.OEmbedProvider("mimeembeed", "mime", [".*"], null)
     ];
 })(jQuery);
 //This is needed for gravatar :(
