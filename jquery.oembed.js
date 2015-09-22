@@ -543,7 +543,8 @@
         if (oembedData.html) {
             code += "<div>" + oembedData.html + "</div>";
         }
-
+        code = $(code);
+        code.find("img").css('max-width', settings.maxWidth || 'auto').css('max-height', settings.maxHeight || 'auto');
         return code;
     };
 
