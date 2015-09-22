@@ -151,7 +151,8 @@
         },
         /** If defined, will be called instead of oembed default embeed function */
         onEmbed: false,
-        /** Called if embeeding wasn't possible, for any reason
+        /** Called if embeeding wasn't possible, for any reason, after trying 
+         * every possible embeed methods.
          * Not the same as onError, which is called on any error, even 
          * recoverable ones */
         onEmbedFailed: function () {
@@ -324,6 +325,12 @@
                 }
 
                 if (embedProvider.apikey) {
+                    if(!settings.apikeys || settings.apikeys[embedProvider.name] === undefined) {
+                        var errorText = "API key for "+embedProvider.name+" isn't present in settings";
+                        settings.onError.call(container, externalUrl, embedProvider, errorText);
+                        errorCb.call(container, externalUrl, embedProvider, errorText);
+                        return;
+                    }
                     src = src.replace('_APIKEY_', settings.apikeys[embedProvider.name]);
                 }
 
@@ -567,7 +574,7 @@
             }
         }
         if(settings.debug) {
-            console.log("getOEmbedProvider for ", url, " returning: ", applicableProviders.length, applicableProviders);
+            console.log("getOEmbedProviders for ", url, " returning: ", applicableProviders.length, applicableProviders);
         }
         return applicableProviders;
     };
